@@ -12,14 +12,13 @@ from telegram.ext import (
 )
 from apscheduler.schedulers.background import BackgroundScheduler
 
-# ── Logging ──────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO)
 
-# ── Environment Variables ─────────────────────────────────
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GROUP_ID  = int(os.environ.get("GROUP_ID"))
 API_KEY   = os.environ.get("API_KEY")
 API_URL   = os.environ.get("API_URL")
+
 
 # ── Rate Limit Tracker ────────────────────────────────────
 ask_usage = {}  # { user_id: { "date": "YYYY-MM-DD", "count": int } }
