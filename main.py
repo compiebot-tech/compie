@@ -80,10 +80,10 @@ def send_morning(bot):
         "- /tip - Get a quick AI or prompt engineering tip\n"
         "- /quiz - Test your AI knowledge\n\n"
         "What is Alpie?\n"
-        "Alpie is an AI assistant built by the 169Pi team. It is designed to be conversational, "
+        "Alpie is an AI assistant built by 169Pi. It is designed to be conversational, "
         "deeply knowledgeable, and genuinely useful across almost any topic you can think of.\n\n"
         "What is 169Pi?\n"
-        "169Pi is the team behind Alpie. They build AI-powered tools and provide API access so "
+        "169Pi behind Alpie. They build AI-powered tools and provide API access so "
         "developers, communities, and businesses can plug Alpie's intelligence directly into their own projects.\n\n"
         "Start your day with a good question. I'm here."
     )
@@ -107,8 +107,8 @@ def send_evening(bot):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Hey! I'm Compie, an AI companion built by a community member to bring Alpie's intelligence right into this group.\n\n"
-        "Alpie is the AI behind my answers, developed by the 169Pi team. I'm an independent project, "
-        "not an official 169Pi product, but I'm powered by their API.\n\n"
+        "Alpie is the AI behind Compie, developed by 169Pi. I'm an independent project, "
+        "not an official 169Pi product, but I'm powered by Alpie-Core API.\n\n"
         "Here's what I can do:\n"
         "- /ask [question] - Ask me anything\n"
         "- /about - Learn about Alpie and 169Pi\n"
@@ -122,7 +122,7 @@ async def about(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Alpie is an AI assistant built by 169Pi.\n\n"
         "It is designed to be conversational, knowledgeable, and helpful across a wide range of topics "
         "including science, technology, business, education, health, and more.\n\n"
-        "169Pi is the team that built Alpie. They provide API access so developers and communities can "
+        "169Pi built Alpie. They provide API access so developers and communities can "
         "integrate Alpie's intelligence into their own platforms and projects.\n\n"
         "This group exists to explore, learn, and make the most of what Alpie and 169Pi have to offer.\n\n"
         "Want to try Alpie right now?\n"
