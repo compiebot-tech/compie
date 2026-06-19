@@ -63,7 +63,7 @@ flask_app = Flask(__name__)
 
 @flask_app.route("/")
 def home():
-    return "Compie is running.", 200
+    return "compie is running.", 200
 
 def run_flask():
     flask_app.run(host="0.0.0.0", port=8080)
@@ -73,7 +73,7 @@ def send_morning(bot):
     import asyncio
     message = (
         "Good morning, everyone!\n\n"
-        "I'm Compie, your AI companion in this group, powered by Alpie by 169Pi.\n\n"
+        "I'm compie, your AI companion in this group, powered by Alpie by 169Pi.\n\n"
         "Here's a quick reminder of what I can do for you right here in this group:\n\n"
         "- /ask [your question] - Ask me anything, I'll answer using Alpie's intelligence\n"
         "- /about - Learn what Alpie and 169Pi are all about\n"
@@ -106,8 +106,8 @@ def send_evening(bot):
 # ── Command Handlers ──────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Hey! I'm Compie, an AI companion built by a community member to bring Alpie's intelligence right into this group.\n\n"
-        "Alpie is the AI behind Compie, developed by 169Pi. I'm an independent project, "
+        "Hey! I'm compie, an AI companion built by a community member to bring Alpie's intelligence right into this group.\n\n"
+        "Alpie is the AI behind compie, developed by 169Pi. I'm an independent project, "
         "not an official 169Pi product, but I'm powered by Alpie-Core API.\n\n"
         "Here's what I can do:\n"
         "- /ask [question] - Ask me anything\n"
@@ -240,7 +240,7 @@ def main():
     )
     scheduler.start()
 
-    logging.info("Compie is running...")
+    logging.info("compie is running...")
     app.run_polling()
 
 if __name__ == "__main__":
