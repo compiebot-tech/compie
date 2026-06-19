@@ -1,4 +1,5 @@
 import os
+import re  # ← ADD THIS at the top with other imports
 import logging
 import requests
 import threading
@@ -21,7 +22,7 @@ API_URL   = os.environ.get("API_URL")
 
 
 # ── Rate Limit Tracker ────────────────────────────────────
-ask_usage = {}  # { user_id: { "date": "YYYY-MM-DD", "count": int } }
+ask_usage = {}
 
 # ── Tips ─────────────────────────────────────────────────
 TIPS = [
@@ -55,7 +56,7 @@ QUIZ_BANK = [
     },
 ]
 quiz_index   = [0]
-pending_quiz = {}  # { user_id: answer }
+pending_quiz = {}
 
 # ── Flask Keep-Alive ──────────────────────────────────────
 flask_app = Flask(__name__)
@@ -105,8 +106,9 @@ def send_evening(bot):
 # ── Command Handlers ──────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Hey! I'm Compie, your AI companion in this group.\n\n"
-        "I'm powered by Alpie by 169Pi.\n\n"
+        "Hey! I'm Compie, an AI companion built by a community member to bring Alpie's intelligence right into this group.\n\n"
+        "Alpie is the AI behind my answers, developed by the 169Pi team. I'm an independent project, "
+        "not an official 169Pi product, but I'm powered by their API.\n\n"
         "Here's what I can do:\n"
         "- /ask [question] - Ask me anything\n"
         "- /about - Learn about Alpie and 169Pi\n"
@@ -201,6 +203,11 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response = requests.post(API_URL, json=payload, headers=headers, timeout=30)
         data     = response.json()
         reply    = data["choices"][0]["message"]["content"]
+
+        # ── Strip internal thinking block ──────────────────
+        reply = re.sub(r'<think>.*?</think>', '', reply, flags=re.DOTALL).strip()
+        # ──────────────────────────────────────────────────
+
         ask_usage[user_id]["count"] += 1
         await update.message.reply_text(reply)
     except Exception as e:
@@ -211,13 +218,10 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ── Main ──────────────────────────────────────────────────
 def main():
-    # Start Flask in a background thread
     threading.Thread(target=run_flask, daemon=True).start()
 
-    # Build the bot application
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Register handlers
     app.add_handler(CommandHandler("start",  start))
     app.add_handler(CommandHandler("about",  about))
     app.add_handler(CommandHandler("tip",    tip))
@@ -225,7 +229,6 @@ def main():
     app.add_handler(CommandHandler("answer", answer))
     app.add_handler(CommandHandler("ask",    ask))
 
-    # Scheduler for daily messages
     scheduler = BackgroundScheduler()
     scheduler.add_job(
         lambda: send_morning(app.bot),
