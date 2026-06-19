@@ -265,11 +265,11 @@ def main():
     scheduler = BackgroundScheduler()
     scheduler.add_job(
         lambda: send_morning(app.bot),
-        "cron", hour=8, minute=0
+        "cron", hour=4, minute=0
     )
     scheduler.add_job(
         lambda: send_evening(app.bot),
-        "cron", hour=20, minute=0
+        "cron", hour=16, minute=0
     )
     scheduler.start()
 
