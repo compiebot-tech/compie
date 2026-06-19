@@ -1,5 +1,5 @@
 import os
-import re  # ← ADD THIS at the top with other imports
+import re
 import logging
 import requests
 import threading
@@ -68,6 +68,14 @@ def home():
 def run_flask():
     flask_app.run(host="0.0.0.0", port=8080)
 
+# ── Helper: Clean thinking blocks from API response ───────
+def strip_thinking(text: str) -> str:
+    # Case 1: Full <think>...</think> block present
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    # Case 2: No opening tag, but closing </think> exists — strip everything before it
+    text = re.sub(r'^.*?</think>', '', text, flags=re.DOTALL)
+    return text.strip()
+
 # ── Scheduled Messages ────────────────────────────────────
 def send_morning(bot):
     import asyncio
@@ -83,7 +91,7 @@ def send_morning(bot):
         "Alpie is an AI assistant built by 169Pi. It is designed to be conversational, "
         "deeply knowledgeable, and genuinely useful across almost any topic you can think of.\n\n"
         "What is 169Pi?\n"
-        "169Pi behind Alpie. They build AI-powered tools and provide API access so "
+        "169Pi is the team behind Alpie. They build AI-powered tools and provide API access so "
         "developers, communities, and businesses can plug Alpie's intelligence directly into their own projects.\n\n"
         "Start your day with a good question. I'm here."
     )
@@ -204,9 +212,9 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data     = response.json()
         reply    = data["choices"][0]["message"]["content"]
 
-        # ── Strip internal thinking block ──────────────────
-        reply = re.sub(r'<think>.*?</think>', '', reply, flags=re.DOTALL).strip()
-        # ──────────────────────────────────────────────────
+        # ── Strip internal thinking block (handles all cases) ──
+        reply = strip_thinking(reply)
+        # ───────────────────────────────────────────────────────
 
         ask_usage[user_id]["count"] += 1
         await update.message.reply_text(reply)
