@@ -193,7 +193,7 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Content-Type": "application/json",
         }
         payload = {
-            "model": "alpie",
+            "model": "alpie-32b",
             "messages": [
                 {"role": "user", "content": question}
             ]
