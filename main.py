@@ -21,6 +21,18 @@ API_KEY   = os.environ.get("API_KEY")
 API_URL   = os.environ.get("API_URL")
 
 
+# ── Group-Only Guard ──────────────────────────────────────
+async def group_only(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if update.effective_chat.type == "private":
+        await update.message.reply_text(
+            "Hi! I'm compie, a group AI companion.\n\n"
+            "I only work inside the group I'm assigned to. "
+            "Head over there and use /ask, /tip, or /quiz!"
+        )
+        return False
+    return True
+
+
 # ── Rate Limit Tracker ────────────────────────────────────
 ask_usage = {}
 
@@ -113,6 +125,8 @@ def send_evening(bot):
 
 # ── Command Handlers ──────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await group_only(update, context):
+        return
     await update.message.reply_text(
         "Hey! I'm compie, an AI companion built by a community member to bring Alpie's intelligence right into this group.\n\n"
         "Alpie is the AI behind compie, developed by 169Pi. I'm an independent project, "
@@ -126,6 +140,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def about(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await group_only(update, context):
+        return
     await update.message.reply_text(
         "Alpie is an AI assistant built by 169Pi.\n\n"
         "It is designed to be conversational, knowledgeable, and helpful across a wide range of topics "
@@ -138,11 +154,15 @@ async def about(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def tip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await group_only(update, context):
+        return
     current_tip = TIPS[tip_index[0] % len(TIPS)]
     tip_index[0] += 1
     await update.message.reply_text(f"Tip of the moment:\n\n{current_tip}")
 
 async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await group_only(update, context):
+        return
     q = QUIZ_BANK[quiz_index[0] % len(QUIZ_BANK)]
     quiz_index[0] += 1
     pending_quiz[update.effective_user.id] = q["answer"]
@@ -152,6 +172,8 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await group_only(update, context):
+        return
     user_id = update.effective_user.id
     if user_id not in pending_quiz:
         await update.message.reply_text("No active quiz found. Type /quiz to start one.")
@@ -172,6 +194,9 @@ async def answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await group_only(update, context):
+        return
+
     user_id   = update.effective_user.id
     today_str = datetime.utcnow().strftime("%Y-%m-%d")
 
