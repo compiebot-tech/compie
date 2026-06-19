@@ -72,17 +72,17 @@ def send_morning(bot):
     import asyncio
     message = (
         "Good morning, everyone!\n\n"
-        "I'm Compie, your AI companion in this group, powered by Alpie and the 169pi team.\n\n"
+        "I'm Compie, your AI companion in this group, powered by Alpie by 169Pi.\n\n"
         "Here's a quick reminder of what I can do for you right here in this group:\n\n"
         "- /ask [your question] - Ask me anything, I'll answer using Alpie's intelligence\n"
-        "- /about - Learn what Alpie and 169pi are all about\n"
+        "- /about - Learn what Alpie and 169Pi are all about\n"
         "- /tip - Get a quick AI or prompt engineering tip\n"
         "- /quiz - Test your AI knowledge\n\n"
         "What is Alpie?\n"
-        "Alpie is an AI assistant built by the 169pi team. It is designed to be conversational, "
+        "Alpie is an AI assistant built by the 169Pi team. It is designed to be conversational, "
         "deeply knowledgeable, and genuinely useful across almost any topic you can think of.\n\n"
-        "What is 169pi?\n"
-        "169pi is the team behind Alpie. They build AI-powered tools and provide API access so "
+        "What is 169Pi?\n"
+        "169Pi is the team behind Alpie. They build AI-powered tools and provide API access so "
         "developers, communities, and businesses can plug Alpie's intelligence directly into their own projects.\n\n"
         "Start your day with a good question. I'm here."
     )
@@ -95,7 +95,7 @@ def send_evening(bot):
         "Before the day wraps up, here's something worth thinking about:\n\n"
         "Alpie is not just a chatbot. It is built to work through complex questions, explain ideas clearly, "
         "and give you answers that are actually useful, whether you are curious about AI, exploring what "
-        "169pi offers, or trying to build something new.\n\n"
+        "169Pi offers, or trying to build something new.\n\n"
         "The best way to understand what Alpie can do is simply to try it.\n\n"
         "Type /ask followed by any question, right here in this group, and see for yourself.\n\n"
         "See you tomorrow morning."
@@ -106,10 +106,10 @@ def send_evening(bot):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Hey! I'm Compie, your AI companion in this group.\n\n"
-        "I'm powered by Alpie and the 169pi team.\n\n"
+        "I'm powered by Alpie by 169Pi.\n\n"
         "Here's what I can do:\n"
         "- /ask [question] - Ask me anything\n"
-        "- /about - Learn about Alpie and 169pi\n"
+        "- /about - Learn about Alpie and 169Pi\n"
         "- /tip - Get a prompt engineering tip\n"
         "- /quiz - Test your AI knowledge\n\n"
         "Try it now. Type /ask followed by any question."
@@ -117,12 +117,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def about(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Alpie is an AI assistant built by the 169pi team.\n\n"
+        "Alpie is an AI assistant built by 169Pi.\n\n"
         "It is designed to be conversational, knowledgeable, and helpful across a wide range of topics "
         "including science, technology, business, education, health, and more.\n\n"
-        "169pi is the team that built Alpie. They provide API access so developers and communities can "
+        "169Pi is the team that built Alpie. They provide API access so developers and communities can "
         "integrate Alpie's intelligence into their own platforms and projects.\n\n"
-        "This group exists to explore, learn, and make the most of what Alpie and 169pi have to offer.\n\n"
+        "This group exists to explore, learn, and make the most of what Alpie and 169Pi have to offer.\n\n"
         "Want to try Alpie right now?\n"
         "Type /ask followed by your question."
     )
