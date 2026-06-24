@@ -117,6 +117,15 @@ def split_message(text: str, limit: int = 4000) -> list:
         parts.append(current.strip())
     return parts
 
+# ── Helper: Strip echoed system prompt from API response ──
+def strip_system_echo(text: str, prompt: str) -> str:
+    """Remove echoed system prompt or instruction prefix from API reply."""
+    if text.startswith(prompt):
+        text = text[len(prompt):]
+    # Also strip if 'User question:' prefix was echoed back
+    text = re.sub(r'^.*?User question:.*?\n', '', text, flags=re.DOTALL)
+    return text.strip()
+
 # ── Scheduled Messages ────────────────────────────────────
 def send_morning(bot):
     import asyncio
@@ -228,7 +237,7 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id     = update.effective_user.id
     today_str   = datetime.utcnow().strftime("%Y-%m-%d")
-    today_human = datetime.utcnow().strftime("%B %d, %Y")   # e.g. June 24, 2026
+    today_human = datetime.utcnow().strftime("%B %d, %Y")
 
     # ── Rate limit check ──────────────────────────────────
     if user_id in ask_usage:
@@ -269,30 +278,38 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"If search results do not clearly match today's date, "
             f"explicitly state that and provide the most recent available."
         )
-        # ──────────────────────────────────────────────────────
 
         payload = {
             "model": "alpie-32b",
             "search": True,
+            "max_tokens": 2048,                      # ← prevents early cutoff
             "messages": [
                 {
-                    "role": "system",
-                    "content": dated_system_prompt
-                },
-                {
                     "role": "user",
-                    "content": question
+                    "content": (
+                        f"{dated_system_prompt}\n\n"
+                        f"User question: {question}"
+                    )
                 }
             ]
         }
+        # ──────────────────────────────────────────────────────
 
-        response = requests.post(API_URL, json=payload, headers=headers, timeout=30)
+        response = requests.post(
+            API_URL,
+            json=payload,
+            headers=headers,
+            timeout=60                               # ← increased from 30 to 60
+        )
         response.raise_for_status()
         data  = response.json()
         reply = data["choices"][0]["message"]["content"]
 
         # ── Strip internal thinking block ──────────────────
         reply = strip_thinking(reply)
+
+        # ── Strip any echoed system prompt or instruction prefix ──
+        reply = strip_system_echo(reply, dated_system_prompt)
         # ──────────────────────────────────────────────────
 
         ask_usage[user_id]["count"] += 1
