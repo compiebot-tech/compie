@@ -1,10 +1,3 @@
-# main.py — compie Telegram Bot
-# Powered by Alpie API (169Pi)
-# Fixes applied:
-#   1. SYSTEM_PROMPT added to API payload (enables real-time behaviour)
-#   2. "search": True added to payload   (activates live web search)
-#   3. if __name__ == "__main__" fixed    (was: if name == "__main__")
-
 import os
 import re
 import logging
@@ -28,8 +21,6 @@ API_KEY   = os.environ.get("API_KEY")
 API_URL   = os.environ.get("API_URL")
 
 # ── System Prompt ─────────────────────────────────────────
-# Instructs Alpie to behave as a live, real-time assistant
-# and unlocks web search for time-sensitive queries like weather
 SYSTEM_PROMPT = (
     "You are compie, an AI companion powered by Alpie, built by 169Pi. "
     "You are operating inside a Telegram group. "
@@ -102,11 +93,11 @@ def home():
 def run_flask():
     flask_app.run(host="0.0.0.0", port=8080)
 
-# ── Helper: Strip internal thinking blocks from API response ──
+# ── Helper: Clean thinking blocks from API response ───────
 def strip_thinking(text: str) -> str:
     # Case 1: Full <think>...</think> block present
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
-    # Case 2: No opening tag but closing </think> exists — strip everything before it
+    # Case 2: No opening tag, but closing </think> exists — strip everything before it
     text = re.sub(r'^.*?</think>', '', text, flags=re.DOTALL)
     return text.strip()
 
@@ -190,28 +181,22 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pending_quiz[update.effective_user.id] = q["answer"]
     options_text = "\n".join(q["options"])
     await update.message.reply_text(
-        f"AI Quiz Time!\n\n{q['question']}\n\n{options_text}\n\n"
-        "Reply with A, B, C, or D.\nType /answer [your choice] when ready."
+        f"AI Quiz Time!\n\n{q['question']}\n\n{options_text}\n\nReply with A, B, C, or D.\nType /answer [your choice] when ready."
     )
 
 async def answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await group_only(update, context):
         return
-
     user_id = update.effective_user.id
-
     if user_id not in pending_quiz:
         await update.message.reply_text("No active quiz found. Type /quiz to start one.")
         return
-
     if not context.args:
         await update.message.reply_text("Please type /answer followed by A, B, C, or D.")
         return
-
     user_answer = context.args[0].upper()
     correct     = pending_quiz.pop(user_id)
     q_data      = next((q for q in QUIZ_BANK if q["answer"] == correct), None)
-
     if user_answer == correct:
         await update.message.reply_text(
             f"Correct! Well done.\n\n{q_data['explanation'] if q_data else ''}"
@@ -225,10 +210,11 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await group_only(update, context):
         return
 
-    user_id   = update.effective_user.id
-    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    user_id     = update.effective_user.id
+    today_str   = datetime.utcnow().strftime("%Y-%m-%d")
+    today_human = datetime.utcnow().strftime("%B %d, %Y")   # e.g. June 24, 2026
 
-    # ── Rate limit: 3 questions per user per day ──────────
+    # ── Rate limit check ──────────────────────────────────
     if user_id in ask_usage:
         if ask_usage[user_id]["date"] == today_str:
             if ask_usage[user_id]["count"] >= 3:
@@ -239,7 +225,6 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
         else:
-            # New day — reset counter
             ask_usage[user_id] = {"date": today_str, "count": 0}
     else:
         ask_usage[user_id] = {"date": today_str, "count": 0}
@@ -249,7 +234,6 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     question = " ".join(context.args)
-
     await update.message.reply_text("Let me think about that...")
 
     try:
@@ -258,15 +242,26 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Content-Type": "application/json",
         }
 
-        # ── FIX 1: system prompt added  → instructs real-time behaviour ──
-        # ── FIX 2: "search": True added → activates live web search      ──
+        # ── Build dated system prompt dynamically per request ──
+        dated_system_prompt = (
+            f"{SYSTEM_PROMPT}\n\n"
+            f"Today's date is {today_human}. "
+            f"When searching for news headlines, sports scores, weather, "
+            f"or any current events, always retrieve results specifically "
+            f"dated {today_human}. "
+            f"Never return headlines or information from previous days. "
+            f"If search results do not clearly match today's date, "
+            f"explicitly state that and provide the most recent available."
+        )
+        # ──────────────────────────────────────────────────────
+
         payload = {
             "model": "alpie-32b",
-            "search": True,                  # ← ENABLES live web search on 169Pi API
+            "search": True,                          # enables live web search
             "messages": [
                 {
                     "role": "system",
-                    "content": SYSTEM_PROMPT  # ← tells Alpie to use search, stay concise
+                    "content": dated_system_prompt   # date-stamped every request
                 },
                 {
                     "role": "user",
@@ -276,33 +271,26 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
 
         response = requests.post(API_URL, json=payload, headers=headers, timeout=30)
-        response.raise_for_status()          # raises on 4xx / 5xx responses
-
+        response.raise_for_status()
         data  = response.json()
         reply = data["choices"][0]["message"]["content"]
 
-        # Strip any internal <think>...</think> blocks from the response
+        # ── Strip internal thinking block ──────────────────
         reply = strip_thinking(reply)
+        # ──────────────────────────────────────────────────
 
-        # Only count usage after a successful response
         ask_usage[user_id]["count"] += 1
-
         await update.message.reply_text(reply)
 
     except requests.exceptions.Timeout:
-        logging.error("API request timed out.")
+        logging.error("Request timed out.")
         await update.message.reply_text(
-            "The request took too long to complete. Please try again in a moment."
+            "The request timed out. Please try again in a moment."
         )
     except requests.exceptions.HTTPError as e:
-        logging.error(f"API HTTP error: {e}")
+        logging.error(f"HTTP error: {e}")
         await update.message.reply_text(
-            "The AI service returned an error. Please try again shortly."
-        )
-    except (KeyError, IndexError) as e:
-        logging.error(f"Unexpected API response structure: {e}")
-        await update.message.reply_text(
-            "Received an unexpected response from the AI service. Please try again."
+            "There was a problem reaching the AI service. Please try again shortly."
         )
     except Exception as e:
         logging.error(f"API error: {e}")
@@ -337,6 +325,5 @@ def main():
     logging.info("compie is running...")
     app.run_polling()
 
-# ── FIX 3: was `if name == "__main__"` (missing double underscores) ──
 if __name__ == "__main__":
     main()
