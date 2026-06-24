@@ -3,6 +3,7 @@ import re
 import logging
 import requests
 import threading
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from flask import Flask
 from telegram import Update
@@ -32,6 +33,22 @@ SYSTEM_PROMPT = (
     "Always provide the most current and accurate answer available. "
     "Keep responses concise and conversational, suitable for a group chat."
 )
+
+# ── News Sources (RSS — no API key needed) ────────────────
+NEWS_SOURCES = [
+    {
+        "name": "Reuters",
+        "url": "https://feeds.reuters.com/reuters/topNews"
+    },
+    {
+        "name": "BBC News",
+        "url": "https://feeds.bbci.co.uk/news/rss.xml"
+    },
+    {
+        "name": "Al Jazeera",
+        "url": "https://www.aljazeera.com/xml/rss/all.xml"
+    },
+]
 
 # ── Group-Only Guard ──────────────────────────────────────
 async def group_only(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -93,17 +110,56 @@ def home():
 def run_flask():
     flask_app.run(host="0.0.0.0", port=8080)
 
+# ── Helper: Fetch Real Headlines via RSS ──────────────────
+def fetch_real_headlines(limit=5):
+    """
+    Fetches real headlines from RSS feeds.
+    No API key needed. Returns a list of headline strings.
+    """
+    headlines = []
+
+    for source in NEWS_SOURCES:
+        if len(headlines) >= limit:
+            break
+        try:
+            resp = requests.get(source["url"], timeout=10)
+            resp.raise_for_status()
+
+            root = ET.fromstring(resp.content)
+
+            # RSS items are under channel > item
+            for item in root.findall(".//item"):
+                if len(headlines) >= limit:
+                    break
+                title = item.findtext("title", "").strip()
+                if title and title.lower() != "rss":
+                    headlines.append(f"- {title} ({source['name']})")
+
+        except Exception as e:
+            logging.warning(f"RSS fetch failed for {source['name']}: {e}")
+            continue
+
+    return headlines
+
+# ── Helper: Detect News/Headlines Intent ──────────────────
+def is_news_question(question: str) -> bool:
+    """Returns True if the question is asking for news or headlines."""
+    keywords = [
+        "news", "headline", "headlines", "today's news",
+        "latest news", "what happened", "current events",
+        "top stories", "breaking", "update", "updates"
+    ]
+    q_lower = question.lower()
+    return any(kw in q_lower for kw in keywords)
+
 # ── Helper: Clean thinking blocks from API response ───────
 def strip_thinking(text: str) -> str:
-    # Case 1: Full <think>...</think> block present
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
-    # Case 2: No opening tag, but closing </think> exists — strip everything before it
     text = re.sub(r'^.*?</think>', '', text, flags=re.DOTALL)
     return text.strip()
 
-# ── Helper: Split long messages for Telegram's 4096 char limit ──
+# ── Helper: Split long messages for Telegram ──────────────
 def split_message(text: str, limit: int = 4000) -> list:
-    """Split text into chunks at newline boundaries under the char limit."""
     parts   = []
     current = ""
     for line in text.splitlines(keepends=True):
@@ -117,14 +173,28 @@ def split_message(text: str, limit: int = 4000) -> list:
         parts.append(current.strip())
     return parts
 
-# ── Helper: Strip echoed system prompt from API response ──
+# ── Helper: Strip echoed system prompt ───────────────────
 def strip_system_echo(text: str, prompt: str) -> str:
-    """Remove echoed system prompt or instruction prefix from API reply."""
     if text.startswith(prompt):
         text = text[len(prompt):]
-    # Also strip if 'User question:' prefix was echoed back
     text = re.sub(r'^.*?User question:.*?\n', '', text, flags=re.DOTALL)
     return text.strip()
+
+# ── Helper: Detect platform system prompt echo ────────────
+SYSTEM_ECHO_MARKERS = [
+    "Memory Usage Policy",
+    "INTENT DETECTION",
+    "Greeting Personalization Rule",
+    "Memory Commitment Rule",
+    "Follow-Up Resolution Rule",
+    "### System Role",
+    "You are **Alpie**",
+    "Response Rules",
+    "Formatting Rules",
+]
+
+def is_system_echo(text: str) -> bool:
+    return any(marker in text for marker in SYSTEM_ECHO_MARKERS)
 
 # ── Scheduled Messages ────────────────────────────────────
 def send_morning(bot):
@@ -261,30 +331,101 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     question = " ".join(context.args)
     await update.message.reply_text("Let me think about that...")
 
+    # ── NEWS SHORTCUT: fetch real headlines via RSS ───────
+    # Bypasses Alpie entirely for news questions.
+    # Alpie only formats the real data — it cannot hallucinate
+    # what it did not generate.
+    if is_news_question(question):
+        headlines = fetch_real_headlines(limit=5)
+
+        if not headlines:
+            await update.message.reply_text(
+                "I wasn't able to fetch live headlines right now. "
+                "Please try again in a moment."
+            )
+            return
+
+        headlines_text = "\n".join(headlines)
+
+        # Pass real headlines to Alpie for clean formatting only
+        try:
+            headers = {
+                "Authorization": f"Bearer {API_KEY}",
+                "Content-Type": "application/json",
+            }
+
+            formatting_prompt = (
+                f"You are compie, a Telegram group AI companion. "
+                f"Today is {today_human}. "
+                f"Below are real, verified news headlines fetched live from trusted sources. "
+                f"Present them clearly and conversationally for a group chat. "
+                f"Do NOT add, remove, change, or invent any information. "
+                f"Only format and present exactly what is given.\n\n"
+                f"Headlines:\n{headlines_text}"
+            )
+
+            payload = {
+                "model": "alpie-32b",
+                "search": False,          # ← OFF: facts already provided
+                "max_tokens": 1024,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": formatting_prompt
+                    }
+                ]
+            }
+
+            response = requests.post(
+                API_URL,
+                json=payload,
+                headers=headers,
+                timeout=60
+            )
+            response.raise_for_status()
+            data  = response.json()
+            reply = data["choices"][0]["message"]["content"]
+
+            reply = strip_thinking(reply)
+
+            if is_system_echo(reply):
+                logging.warning("System prompt echo detected — sending raw headlines.")
+                reply = f"Here are today's top headlines ({today_human}):\n\n{headlines_text}"
+
+        except Exception as e:
+            logging.error(f"Alpie formatting failed: {e} — sending raw headlines.")
+            reply = f"Here are today's top headlines ({today_human}):\n\n{headlines_text}"
+
+        ask_usage[user_id]["count"] += 1
+        chunks = split_message(reply)
+        for chunk in chunks:
+            await update.message.reply_text(chunk)
+        return
+    # ─────────────────────────────────────────────────────
+
+    # ── ALL OTHER QUESTIONS: send to Alpie as normal ─────
     try:
         headers = {
             "Authorization": f"Bearer {API_KEY}",
             "Content-Type": "application/json",
         }
 
-        # ── Build dated system prompt dynamically per request ──
         dated_system_prompt = (
             f"{SYSTEM_PROMPT}\n\n"
             f"Today's date is {today_human}. "
-            f"When searching for news headlines, sports scores, weather, "
+            f"When searching for sports scores, weather, prices, "
             f"or any current events, always retrieve results specifically "
             f"dated {today_human}. "
-            f"Never return headlines or information from previous days. "
+            f"Never return information from previous days. "
             f"If search results do not clearly match today's date, "
             f"explicitly state that and provide the most recent available.\n\n"
-            f"CRITICAL: Never fabricate, invent, or assume facts. "           # ← NEW
-            f"Every headline, score, result, or statistic you report "         # ← NEW
-            f"MUST come directly from your web search results. "               # ← NEW
-            f"If you cannot find verified information for a specific item, "   # ← NEW
-            f"say so clearly instead of generating a plausible-sounding answer. " # ← NEW
-            f"Do not fill gaps with assumed or historically expected outcomes." # ← NEW
+            f"CRITICAL: Never fabricate, invent, or assume facts. "
+            f"Every score, result, or statistic you report "
+            f"MUST come directly from your web search results. "
+            f"If you cannot find verified information for a specific item, "
+            f"say so clearly instead of generating a plausible-sounding answer. "
+            f"Do not fill gaps with assumed or historically expected outcomes."
         )
-        # ──────────────────────────────────────────────────────
 
         payload = {
             "model": "alpie-32b",
@@ -311,20 +452,21 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data  = response.json()
         reply = data["choices"][0]["message"]["content"]
 
-        # ── Strip internal thinking block ──────────────────
         reply = strip_thinking(reply)
-
-        # ── Strip any echoed system prompt or instruction prefix ──
         reply = strip_system_echo(reply, dated_system_prompt)
-        # ──────────────────────────────────────────────────
+
+        if is_system_echo(reply):
+            logging.warning("System prompt echo detected — suppressing response.")
+            reply = (
+                "I ran into an issue retrieving that answer. "
+                "Please try again in a moment."
+            )
 
         ask_usage[user_id]["count"] += 1
 
-        # ── Split and send in chunks if response is long ──
         chunks = split_message(reply)
         for chunk in chunks:
             await update.message.reply_text(chunk)
-        # ─────────────────────────────────────────────────
 
     except requests.exceptions.Timeout:
         logging.error("Request timed out.")
