@@ -101,6 +101,22 @@ def strip_thinking(text: str) -> str:
     text = re.sub(r'^.*?</think>', '', text, flags=re.DOTALL)
     return text.strip()
 
+# ── Helper: Split long messages for Telegram's 4096 char limit ──
+def split_message(text: str, limit: int = 4000) -> list:
+    """Split text into chunks at newline boundaries under the char limit."""
+    parts   = []
+    current = ""
+    for line in text.splitlines(keepends=True):
+        if len(current) + len(line) > limit:
+            if current:
+                parts.append(current.strip())
+            current = line
+        else:
+            current += line
+    if current.strip():
+        parts.append(current.strip())
+    return parts
+
 # ── Scheduled Messages ────────────────────────────────────
 def send_morning(bot):
     import asyncio
@@ -257,11 +273,11 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         payload = {
             "model": "alpie-32b",
-            "search": True,                          # enables live web search
+            "search": True,
             "messages": [
                 {
                     "role": "system",
-                    "content": dated_system_prompt   # date-stamped every request
+                    "content": dated_system_prompt
                 },
                 {
                     "role": "user",
@@ -280,7 +296,12 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # ──────────────────────────────────────────────────
 
         ask_usage[user_id]["count"] += 1
-        await update.message.reply_text(reply)
+
+        # ── Split and send in chunks if response is long ──
+        chunks = split_message(reply)
+        for chunk in chunks:
+            await update.message.reply_text(chunk)
+        # ─────────────────────────────────────────────────
 
     except requests.exceptions.Timeout:
         logging.error("Request timed out.")
