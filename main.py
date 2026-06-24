@@ -16,6 +16,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 logging.basicConfig(level=logging.INFO)
 
+# ── Environment Variables ─────────────────────────────────
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GROUP_ID  = int(os.environ.get("GROUP_ID"))
 API_KEY   = os.environ.get("API_KEY")
@@ -34,19 +35,28 @@ SYSTEM_PROMPT = (
     "Keep responses concise and conversational, suitable for a group chat."
 )
 
-# ── News Sources (RSS — no API key needed) ────────────────
+# ── News RSS Sources ──────────────────────────────────────
+# Multiple sources ensure coverage even if one feed is down or stale.
 NEWS_SOURCES = [
     {
         "name": "Reuters",
-        "url": "https://feeds.reuters.com/reuters/topNews"
+        "url":  "https://feeds.reuters.com/reuters/topNews"
     },
     {
         "name": "BBC News",
-        "url": "https://feeds.bbci.co.uk/news/rss.xml"
+        "url":  "https://feeds.bbci.co.uk/news/world/rss.xml"
+    },
+    {
+        "name": "AP News",
+        "url":  "https://rsshub.app/apnews/topics/apf-topnews"
+    },
+    {
+        "name": "The Guardian",
+        "url":  "https://www.theguardian.com/world/rss"
     },
     {
         "name": "Al Jazeera",
-        "url": "https://www.aljazeera.com/xml/rss/all.xml"
+        "url":  "https://www.aljazeera.com/xml/rss/all.xml"
     },
 ]
 
@@ -78,21 +88,21 @@ tip_index = [0]
 # ── Quiz Bank ─────────────────────────────────────────────
 QUIZ_BANK = [
     {
-        "question": "What does LLM stand for in the context of AI?",
-        "options": ["A) Large Language Model", "B) Logical Learning Machine", "C) Linear Language Module", "D) Layered Logic Mechanism"],
-        "answer": "A",
+        "question":    "What does LLM stand for in the context of AI?",
+        "options":     ["A) Large Language Model", "B) Logical Learning Machine", "C) Linear Language Module", "D) Layered Logic Mechanism"],
+        "answer":      "A",
         "explanation": "LLM stands for Large Language Model. Examples include GPT-4 and Alpie."
     },
     {
-        "question": "Which company created the GPT series of AI models?",
-        "options": ["A) Google", "B) Meta", "C) OpenAI", "D) Microsoft"],
-        "answer": "C",
+        "question":    "Which company created the GPT series of AI models?",
+        "options":     ["A) Google", "B) Meta", "C) OpenAI", "D) Microsoft"],
+        "answer":      "C",
         "explanation": "The GPT series was created by OpenAI."
     },
     {
-        "question": "What does API stand for?",
-        "options": ["A) Automated Program Interface", "B) Application Programming Interface", "C) Applied Process Integration", "D) Advanced Protocol Input"],
-        "answer": "B",
+        "question":    "What does API stand for?",
+        "options":     ["A) Automated Program Interface", "B) Application Programming Interface", "C) Applied Process Integration", "D) Advanced Protocol Input"],
+        "answer":      "B",
         "explanation": "API stands for Application Programming Interface. It allows different software systems to communicate."
     },
 ]
@@ -111,76 +121,110 @@ def run_flask():
     flask_app.run(host="0.0.0.0", port=8080)
 
 # ── Helper: Fetch Real Headlines via RSS ──────────────────
-def fetch_real_headlines(limit=5):
+def fetch_real_headlines(limit: int = 5) -> list:
     """
-    Fetches real headlines from RSS feeds.
-    No API key needed. Returns a list of headline strings.
+    Fetches real, date-validated headlines from RSS feeds.
+    - Prioritises items published today.
+    - Falls back to most recent items if nothing dated today is found.
+    - No API key required.
     """
-    headlines = []
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    headlines = []   # confirmed today's headlines
+    fallback  = []   # most recent headlines regardless of date
+
+    request_headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; compie-bot/1.0)"
+    }
 
     for source in NEWS_SOURCES:
         if len(headlines) >= limit:
             break
+
         try:
-            resp = requests.get(source["url"], timeout=10)
+            resp = requests.get(
+                source["url"],
+                timeout=10,
+                headers=request_headers
+            )
             resp.raise_for_status()
 
             root = ET.fromstring(resp.content)
 
-            # RSS items are under channel > item
             for item in root.findall(".//item"):
-                if len(headlines) >= limit:
-                    break
-                title = item.findtext("title", "").strip()
-                if title and title.lower() != "rss":
-                    headlines.append(f"- {title} ({source['name']})")
+                title    = item.findtext("title", "").strip()
+                pub_date = item.findtext("pubDate", "").strip()
+
+                # Skip empty or junk titles
+                if not title or title.lower() in ("rss", "feed"):
+                    continue
+
+                formatted    = f"- {title} ({source['name']})"
+                date_matched = False
+
+                if pub_date:
+                    try:
+                        # pubDate format: "Tue, 24 Jun 2026 10:00:00 GMT"
+                        parsed_date   = datetime.strptime(
+                            pub_date[:16].strip(), "%a, %d %b %Y"
+                        )
+                        item_date_str = parsed_date.strftime("%Y-%m-%d")
+                        date_matched  = (item_date_str == today_str)
+
+                        if not date_matched:
+                            logging.info(
+                                f"Skipping old headline ({item_date_str}): {title[:60]}"
+                            )
+                    except ValueError:
+                        # Date parse failed — include it rather than discard
+                        date_matched = True
+
+                else:
+                    # No pubDate available — include it rather than discard
+                    date_matched = True
+
+                if date_matched and len(headlines) < limit:
+                    headlines.append(formatted)
+                elif len(fallback) < limit:
+                    fallback.append(formatted)
 
         except Exception as e:
             logging.warning(f"RSS fetch failed for {source['name']}: {e}")
             continue
 
-    return headlines
+    # Return today's headlines if found, otherwise fall back to most recent
+    result = headlines if headlines else fallback
+    logging.info(
+        f"fetch_real_headlines: {len(result)} items returned "
+        f"({'today' if headlines else 'fallback'})"
+    )
+    return result
 
 # ── Helper: Detect News/Headlines Intent ──────────────────
 def is_news_question(question: str) -> bool:
-    """Returns True if the question is asking for news or headlines."""
+    """Returns True if the user is asking for news or headlines."""
     keywords = [
         "news", "headline", "headlines", "today's news",
         "latest news", "what happened", "current events",
-        "top stories", "breaking", "update", "updates"
+        "top stories", "breaking", "update", "updates",
+        "what's happening", "whats happening",
     ]
     q_lower = question.lower()
     return any(kw in q_lower for kw in keywords)
 
-# ── Helper: Clean thinking blocks from API response ───────
+# ── Helper: Strip <think> blocks from API response ────────
 def strip_thinking(text: str) -> str:
-    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
-    text = re.sub(r'^.*?</think>', '', text, flags=re.DOTALL)
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    text = re.sub(r"^.*?</think>",       "", text, flags=re.DOTALL)
     return text.strip()
 
-# ── Helper: Split long messages for Telegram ──────────────
-def split_message(text: str, limit: int = 4000) -> list:
-    parts   = []
-    current = ""
-    for line in text.splitlines(keepends=True):
-        if len(current) + len(line) > limit:
-            if current:
-                parts.append(current.strip())
-            current = line
-        else:
-            current += line
-    if current.strip():
-        parts.append(current.strip())
-    return parts
-
-# ── Helper: Strip echoed system prompt ───────────────────
+# ── Helper: Strip echoed system prompt ────────────────────
 def strip_system_echo(text: str, prompt: str) -> str:
     if text.startswith(prompt):
         text = text[len(prompt):]
-    text = re.sub(r'^.*?User question:.*?\n', '', text, flags=re.DOTALL)
+    text = re.sub(r"^.*?User question:.*?\n", "", text, flags=re.DOTALL)
     return text.strip()
 
-# ── Helper: Detect platform system prompt echo ────────────
+# ── Helper: Detect platform-level system prompt echo ──────
 SYSTEM_ECHO_MARKERS = [
     "Memory Usage Policy",
     "INTENT DETECTION",
@@ -196,6 +240,21 @@ SYSTEM_ECHO_MARKERS = [
 def is_system_echo(text: str) -> bool:
     return any(marker in text for marker in SYSTEM_ECHO_MARKERS)
 
+# ── Helper: Split long messages for Telegram's 4096 limit ─
+def split_message(text: str, limit: int = 4000) -> list:
+    parts   = []
+    current = ""
+    for line in text.splitlines(keepends=True):
+        if len(current) + len(line) > limit:
+            if current:
+                parts.append(current.strip())
+            current = line
+        else:
+            current += line
+    if current.strip():
+        parts.append(current.strip())
+    return parts
+
 # ── Scheduled Messages ────────────────────────────────────
 def send_morning(bot):
     import asyncio
@@ -203,10 +262,10 @@ def send_morning(bot):
         "Good morning, everyone!\n\n"
         "I'm compie, your AI companion in this group, powered by Alpie by 169Pi.\n\n"
         "Here's a quick reminder of what I can do for you right here in this group:\n\n"
-        "- /ask [your question] - Ask me anything, I'll answer using Alpie's intelligence\n"
-        "- /about - Learn what Alpie and 169Pi are all about\n"
-        "- /tip - Get a quick AI or prompt engineering tip\n"
-        "- /quiz - Test your AI knowledge\n\n"
+        "- /ask [your question] — Ask me anything\n"
+        "- /about — Learn what Alpie and 169Pi are all about\n"
+        "- /tip — Get a quick AI or prompt engineering tip\n"
+        "- /quiz — Test your AI knowledge\n\n"
         "What is Alpie?\n"
         "Alpie is an AI assistant built by 169Pi. It is designed to be conversational, "
         "deeply knowledgeable, and genuinely useful across almost any topic you can think of.\n\n"
@@ -223,7 +282,7 @@ def send_evening(bot):
         "Good evening, everyone!\n\n"
         "Before the day wraps up, here's something worth thinking about:\n\n"
         "Alpie is not just a chatbot. It is built to work through complex questions, explain ideas clearly, "
-        "and give you answers that are actually useful, whether you are curious about AI, exploring what "
+        "and give you answers that are actually useful — whether you are curious about AI, exploring what "
         "169Pi offers, or trying to build something new.\n\n"
         "The best way to understand what Alpie can do is simply to try it.\n\n"
         "Type /ask followed by any question, right here in this group, and see for yourself.\n\n"
@@ -240,10 +299,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Alpie is the AI behind compie, developed by 169Pi. I'm an independent project, "
         "not an official 169Pi product, but I'm powered by Alpie-Core API.\n\n"
         "Here's what I can do:\n"
-        "- /ask [question] - Ask me anything\n"
-        "- /about - Learn about Alpie and 169Pi\n"
-        "- /tip - Get a prompt engineering tip\n"
-        "- /quiz - Test your AI knowledge\n\n"
+        "- /ask [question] — Ask me anything\n"
+        "- /about — Learn about Alpie and 169Pi\n"
+        "- /tip — Get a prompt engineering tip\n"
+        "- /quiz — Test your AI knowledge\n\n"
         "Try it now. Type /ask followed by any question."
     )
 
@@ -254,11 +313,10 @@ async def about(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Alpie is an AI assistant built by 169Pi.\n\n"
         "It is designed to be conversational, knowledgeable, and helpful across a wide range of topics "
         "including science, technology, business, education, health, and more.\n\n"
-        "169Pi built Alpie. They provide API access so developers and communities can "
+        "169Pi built Alpie and provides API access so developers and communities can "
         "integrate Alpie's intelligence into their own platforms and projects.\n\n"
         "This group exists to explore, learn, and make the most of what Alpie and 169Pi have to offer.\n\n"
-        "Want to try Alpie right now?\n"
-        "Type /ask followed by your question."
+        "Want to try Alpie right now? Type /ask followed by your question."
     )
 
 async def tip(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -276,7 +334,9 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pending_quiz[update.effective_user.id] = q["answer"]
     options_text = "\n".join(q["options"])
     await update.message.reply_text(
-        f"AI Quiz Time!\n\n{q['question']}\n\n{options_text}\n\nReply with A, B, C, or D.\nType /answer [your choice] when ready."
+        f"AI Quiz Time!\n\n{q['question']}\n\n{options_text}\n\n"
+        f"Reply with A, B, C, or D.\n"
+        f"Type /answer [your choice] when ready."
     )
 
 async def answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -284,10 +344,14 @@ async def answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     user_id = update.effective_user.id
     if user_id not in pending_quiz:
-        await update.message.reply_text("No active quiz found. Type /quiz to start one.")
+        await update.message.reply_text(
+            "No active quiz found. Type /quiz to start one."
+        )
         return
     if not context.args:
-        await update.message.reply_text("Please type /answer followed by A, B, C, or D.")
+        await update.message.reply_text(
+            "Please type /answer followed by A, B, C, or D."
+        )
         return
     user_answer = context.args[0].upper()
     correct     = pending_quiz.pop(user_id)
@@ -298,9 +362,11 @@ async def answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         await update.message.reply_text(
-            f"Not quite. The correct answer is {correct}.\n\n{q_data['explanation'] if q_data else ''}"
+            f"Not quite. The correct answer is {correct}.\n\n"
+            f"{q_data['explanation'] if q_data else ''}"
         )
 
+# ── Main Command: /ask ────────────────────────────────────
 async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await group_only(update, context):
         return
@@ -309,32 +375,42 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     today_str   = datetime.utcnow().strftime("%Y-%m-%d")
     today_human = datetime.utcnow().strftime("%B %d, %Y")
 
-    # ── Rate limit check ──────────────────────────────────
+    # ── Rate limit: 3 questions per user per day ──────────
     if user_id in ask_usage:
         if ask_usage[user_id]["date"] == today_str:
             if ask_usage[user_id]["count"] >= 3:
                 await update.message.reply_text(
-                    "You have reached today's limit for questions. "
+                    "You have reached today's limit of 3 questions. "
                     "Come back tomorrow and ask away again.\n\n"
-                    "In the meantime, try /tip or /quiz, both are unlimited and always ready."
+                    "In the meantime, try /tip or /quiz — both are unlimited."
                 )
                 return
         else:
+            # New day — reset counter
             ask_usage[user_id] = {"date": today_str, "count": 0}
     else:
         ask_usage[user_id] = {"date": today_str, "count": 0}
 
     if not context.args:
-        await update.message.reply_text("Please type /ask followed by your question.")
+        await update.message.reply_text(
+            "Please type /ask followed by your question."
+        )
         return
 
     question = " ".join(context.args)
-    await update.message.reply_text("Let me think about that...")
+    await update.message.reply_text("Let me check on that...")
 
-    # ── NEWS SHORTCUT: fetch real headlines via RSS ───────
-    # Bypasses Alpie entirely for news questions.
-    # Alpie only formats the real data — it cannot hallucinate
-    # what it did not generate.
+    # ════════════════════════════════════════════════════════
+    # NEWS PATH
+    # Triggered when user asks for news or headlines.
+    # Strategy:
+    #   1. Fetch real headlines from RSS feeds (date-validated)
+    #   2. Pass verified headlines to Alpie for formatting only
+    #   3. search=False so Alpie cannot override facts with hallucinations
+    #   4. If Alpie fails or echoes, send raw headlines directly
+    # This eliminates political hallucinations completely because
+    # Alpie never generates the facts — it only formats them.
+    # ════════════════════════════════════════════════════════
     if is_news_question(question):
         headlines = fetch_real_headlines(limit=5)
 
@@ -347,7 +423,7 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         headlines_text = "\n".join(headlines)
 
-        # Pass real headlines to Alpie for clean formatting only
+        # Ask Alpie to format the real headlines — not to generate them
         try:
             headers = {
                 "Authorization": f"Bearer {API_KEY}",
@@ -357,20 +433,21 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
             formatting_prompt = (
                 f"You are compie, a Telegram group AI companion. "
                 f"Today is {today_human}. "
-                f"Below are real, verified news headlines fetched live from trusted sources. "
+                f"Below are real, verified news headlines fetched live from trusted sources right now. "
                 f"Present them clearly and conversationally for a group chat. "
-                f"Do NOT add, remove, change, or invent any information. "
-                f"Only format and present exactly what is given.\n\n"
+                f"Do NOT add, remove, change, invent, or assume any information beyond what is given. "
+                f"Do not add context, background, or commentary about any headline. "
+                f"Only format and present exactly what is listed below.\n\n"
                 f"Headlines:\n{headlines_text}"
             )
 
             payload = {
-                "model": "alpie-32b",
-                "search": False,          # ← OFF: facts already provided
+                "model":      "alpie-32b",
+                "search":     False,        # OFF — facts already provided, no hallucination allowed
                 "max_tokens": 1024,
                 "messages": [
                     {
-                        "role": "user",
+                        "role":    "user",
                         "content": formatting_prompt
                     }
                 ]
@@ -383,27 +460,39 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 timeout=60
             )
             response.raise_for_status()
+
             data  = response.json()
             reply = data["choices"][0]["message"]["content"]
-
             reply = strip_thinking(reply)
 
+            # If Alpie echoes system prompt instead of formatting, fall back to raw
             if is_system_echo(reply):
-                logging.warning("System prompt echo detected — sending raw headlines.")
-                reply = f"Here are today's top headlines ({today_human}):\n\n{headlines_text}"
+                logging.warning("System echo on news response — using raw headlines.")
+                reply = (
+                    f"Here are the latest headlines ({today_human}):\n\n"
+                    f"{headlines_text}"
+                )
 
         except Exception as e:
-            logging.error(f"Alpie formatting failed: {e} — sending raw headlines.")
-            reply = f"Here are today's top headlines ({today_human}):\n\n{headlines_text}"
+            # If Alpie call fails for any reason, send raw headlines — user still gets real data
+            logging.error(f"Alpie formatting failed for news: {e} — sending raw headlines.")
+            reply = (
+                f"Here are the latest headlines ({today_human}):\n\n"
+                f"{headlines_text}"
+            )
 
         ask_usage[user_id]["count"] += 1
         chunks = split_message(reply)
         for chunk in chunks:
             await update.message.reply_text(chunk)
         return
-    # ─────────────────────────────────────────────────────
 
-    # ── ALL OTHER QUESTIONS: send to Alpie as normal ─────
+    # ════════════════════════════════════════════════════════
+    # GENERAL PATH
+    # All non-news questions go here.
+    # search=True allows Alpie to retrieve live data (weather,
+    # sports, prices, general knowledge, etc.)
+    # ════════════════════════════════════════════════════════
     try:
         headers = {
             "Authorization": f"Bearer {API_KEY}",
@@ -420,7 +509,7 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"If search results do not clearly match today's date, "
             f"explicitly state that and provide the most recent available.\n\n"
             f"CRITICAL: Never fabricate, invent, or assume facts. "
-            f"Every score, result, or statistic you report "
+            f"Every score, result, statistic, or named event you report "
             f"MUST come directly from your web search results. "
             f"If you cannot find verified information for a specific item, "
             f"say so clearly instead of generating a plausible-sounding answer. "
@@ -428,12 +517,12 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         payload = {
-            "model": "alpie-32b",
-            "search": True,
+            "model":      "alpie-32b",
+            "search":     True,
             "max_tokens": 2048,
             "messages": [
                 {
-                    "role": "user",
+                    "role":    "user",
                     "content": (
                         f"{dated_system_prompt}\n\n"
                         f"User question: {question}"
@@ -449,12 +538,14 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
             timeout=60
         )
         response.raise_for_status()
+
         data  = response.json()
         reply = data["choices"][0]["message"]["content"]
 
         reply = strip_thinking(reply)
         reply = strip_system_echo(reply, dated_system_prompt)
 
+        # Catch platform-level system prompt echo
         if is_system_echo(reply):
             logging.warning("System prompt echo detected — suppressing response.")
             reply = (
@@ -479,13 +570,14 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "There was a problem reaching the AI service. Please try again shortly."
         )
     except Exception as e:
-        logging.error(f"API error: {e}")
+        logging.error(f"Unexpected error in /ask: {e}")
         await update.message.reply_text(
             "Something went wrong while fetching the answer. Please try again in a moment."
         )
 
-# ── Main ──────────────────────────────────────────────────
+# ── Entry Point ───────────────────────────────────────────
 def main():
+    # Start Flask keep-alive in background thread
     threading.Thread(target=run_flask, daemon=True).start()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
