@@ -276,13 +276,20 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"dated {today_human}. "
             f"Never return headlines or information from previous days. "
             f"If search results do not clearly match today's date, "
-            f"explicitly state that and provide the most recent available."
+            f"explicitly state that and provide the most recent available.\n\n"
+            f"CRITICAL: Never fabricate, invent, or assume facts. "           # ← NEW
+            f"Every headline, score, result, or statistic you report "         # ← NEW
+            f"MUST come directly from your web search results. "               # ← NEW
+            f"If you cannot find verified information for a specific item, "   # ← NEW
+            f"say so clearly instead of generating a plausible-sounding answer. " # ← NEW
+            f"Do not fill gaps with assumed or historically expected outcomes." # ← NEW
         )
+        # ──────────────────────────────────────────────────────
 
         payload = {
             "model": "alpie-32b",
             "search": True,
-            "max_tokens": 2048,                      # ← prevents early cutoff
+            "max_tokens": 2048,
             "messages": [
                 {
                     "role": "user",
@@ -293,13 +300,12 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 }
             ]
         }
-        # ──────────────────────────────────────────────────────
 
         response = requests.post(
             API_URL,
             json=payload,
             headers=headers,
-            timeout=60                               # ← increased from 30 to 60
+            timeout=60
         )
         response.raise_for_status()
         data  = response.json()
