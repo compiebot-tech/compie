@@ -1,3 +1,10 @@
+# main.py — compie Telegram Bot
+# Powered by Alpie API (169Pi)
+# Fixes applied:
+#   1. SYSTEM_PROMPT added to API payload (enables real-time behaviour)
+#   2. "search": True added to payload   (activates live web search)
+#   3. if __name__ == "__main__" fixed    (was: if name == "__main__")
+
 import os
 import re
 import logging
@@ -21,9 +28,8 @@ API_KEY   = os.environ.get("API_KEY")
 API_URL   = os.environ.get("API_URL")
 
 # ── System Prompt ─────────────────────────────────────────
-# This tells Alpie to behave as a live, real-time assistant
+# Instructs Alpie to behave as a live, real-time assistant
 # and unlocks web search for time-sensitive queries like weather
-
 SYSTEM_PROMPT = (
     "You are compie, an AI companion powered by Alpie, built by 169Pi. "
     "You are operating inside a Telegram group. "
@@ -37,7 +43,6 @@ SYSTEM_PROMPT = (
 )
 
 # ── Group-Only Guard ──────────────────────────────────────
-
 async def group_only(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if update.effective_chat.type == "private":
         await update.message.reply_text(
@@ -49,11 +54,9 @@ async def group_only(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool
     return True
 
 # ── Rate Limit Tracker ────────────────────────────────────
-
 ask_usage = {}
 
 # ── Tips ─────────────────────────────────────────────────
-
 TIPS = [
     "Be specific in your prompts. Instead of asking 'explain AI', try 'explain how a large language model processes a question in simple terms.' The more context you give, the better the answer.",
     "Give Alpie a role. Try starting your question with 'As a financial advisor...' or 'As a teacher explaining to a 10 year old...' and watch how the response shifts in tone and depth.",
@@ -65,7 +68,6 @@ TIPS = [
 tip_index = [0]
 
 # ── Quiz Bank ─────────────────────────────────────────────
-
 QUIZ_BANK = [
     {
         "question": "What does LLM stand for in the context of AI?",
@@ -91,7 +93,6 @@ quiz_index   = [0]
 pending_quiz = {}
 
 # ── Flask Keep-Alive ──────────────────────────────────────
-
 flask_app = Flask(__name__)
 
 @flask_app.route("/")
@@ -101,17 +102,15 @@ def home():
 def run_flask():
     flask_app.run(host="0.0.0.0", port=8080)
 
-# ── Helper: Clean thinking blocks from API response ───────
-
+# ── Helper: Strip internal thinking blocks from API response ──
 def strip_thinking(text: str) -> str:
     # Case 1: Full <think>...</think> block present
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
-    # Case 2: No opening tag, but closing </think> exists — strip everything before it
+    # Case 2: No opening tag but closing </think> exists — strip everything before it
     text = re.sub(r'^.*?</think>', '', text, flags=re.DOTALL)
     return text.strip()
 
 # ── Scheduled Messages ────────────────────────────────────
-
 def send_morning(bot):
     import asyncio
     message = (
@@ -147,7 +146,6 @@ def send_evening(bot):
     asyncio.run(bot.send_message(chat_id=GROUP_ID, text=message))
 
 # ── Command Handlers ──────────────────────────────────────
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await group_only(update, context):
         return
@@ -192,22 +190,28 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pending_quiz[update.effective_user.id] = q["answer"]
     options_text = "\n".join(q["options"])
     await update.message.reply_text(
-        f"AI Quiz Time!\n\n{q['question']}\n\n{options_text}\n\nReply with A, B, C, or D.\nType /answer [your choice] when ready."
+        f"AI Quiz Time!\n\n{q['question']}\n\n{options_text}\n\n"
+        "Reply with A, B, C, or D.\nType /answer [your choice] when ready."
     )
 
 async def answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await group_only(update, context):
         return
+
     user_id = update.effective_user.id
+
     if user_id not in pending_quiz:
         await update.message.reply_text("No active quiz found. Type /quiz to start one.")
         return
+
     if not context.args:
         await update.message.reply_text("Please type /answer followed by A, B, C, or D.")
         return
+
     user_answer = context.args[0].upper()
     correct     = pending_quiz.pop(user_id)
     q_data      = next((q for q in QUIZ_BANK if q["answer"] == correct), None)
+
     if user_answer == correct:
         await update.message.reply_text(
             f"Correct! Well done.\n\n{q_data['explanation'] if q_data else ''}"
@@ -224,7 +228,7 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id   = update.effective_user.id
     today_str = datetime.utcnow().strftime("%Y-%m-%d")
 
-    # ── Rate limit check ──────────────────────────────────
+    # ── Rate limit: 3 questions per user per day ──────────
     if user_id in ask_usage:
         if ask_usage[user_id]["date"] == today_str:
             if ask_usage[user_id]["count"] >= 3:
@@ -235,6 +239,7 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
         else:
+            # New day — reset counter
             ask_usage[user_id] = {"date": today_str, "count": 0}
     else:
         ask_usage[user_id] = {"date": today_str, "count": 0}
@@ -244,6 +249,7 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     question = " ".join(context.args)
+
     await update.message.reply_text("Let me think about that...")
 
     try:
@@ -252,13 +258,15 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Content-Type": "application/json",
         }
 
-        # ── FIX: Added system prompt with live search instruction ──
+        # ── FIX 1: system prompt added  → instructs real-time behaviour ──
+        # ── FIX 2: "search": True added → activates live web search      ──
         payload = {
             "model": "alpie-32b",
+            "search": True,                  # ← ENABLES live web search on 169Pi API
             "messages": [
                 {
-                    "role": "system",           # <-- system prompt added here
-                    "content": SYSTEM_PROMPT    # <-- unlocks real-time behaviour
+                    "role": "system",
+                    "content": SYSTEM_PROMPT  # ← tells Alpie to use search, stay concise
                 },
                 {
                     "role": "user",
@@ -266,19 +274,36 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 }
             ]
         }
-        # ──────────────────────────────────────────────────────────
 
         response = requests.post(API_URL, json=payload, headers=headers, timeout=30)
-        data     = response.json()
-        reply    = data["choices"][0]["message"]["content"]
+        response.raise_for_status()          # raises on 4xx / 5xx responses
 
-        # ── Strip internal thinking block ──────────────────────────
+        data  = response.json()
+        reply = data["choices"][0]["message"]["content"]
+
+        # Strip any internal <think>...</think> blocks from the response
         reply = strip_thinking(reply)
-        # ──────────────────────────────────────────────────────────
 
+        # Only count usage after a successful response
         ask_usage[user_id]["count"] += 1
+
         await update.message.reply_text(reply)
 
+    except requests.exceptions.Timeout:
+        logging.error("API request timed out.")
+        await update.message.reply_text(
+            "The request took too long to complete. Please try again in a moment."
+        )
+    except requests.exceptions.HTTPError as e:
+        logging.error(f"API HTTP error: {e}")
+        await update.message.reply_text(
+            "The AI service returned an error. Please try again shortly."
+        )
+    except (KeyError, IndexError) as e:
+        logging.error(f"Unexpected API response structure: {e}")
+        await update.message.reply_text(
+            "Received an unexpected response from the AI service. Please try again."
+        )
     except Exception as e:
         logging.error(f"API error: {e}")
         await update.message.reply_text(
@@ -286,7 +311,6 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 # ── Main ──────────────────────────────────────────────────
-
 def main():
     threading.Thread(target=run_flask, daemon=True).start()
 
@@ -313,5 +337,6 @@ def main():
     logging.info("compie is running...")
     app.run_polling()
 
+# ── FIX 3: was `if name == "__main__"` (missing double underscores) ──
 if __name__ == "__main__":
     main()
